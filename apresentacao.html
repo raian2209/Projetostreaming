@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Projeto Streaming — ED2</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/theme/black.css" id="theme">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/plugin/highlight/monokai.css">
+
+  <style>
+    :root { --r-main-font-size: 30px; }
+    .reveal h1 { font-size: 1.7em; }
+    .reveal h2 { color: #4fc3f7; text-transform: none; }
+    .reveal h3 { color: #80cbc4; text-transform: none; }
+    .reveal pre { width: 100%; box-shadow: none; font-size: 0.52em; }
+    .reveal pre code { max-height: 520px; padding: 14px; border-radius: 8px; }
+    .reveal section img { border: none; background: none; box-shadow: none; }
+    .reveal table { font-size: 0.7em; }
+    .reveal table th { color: #4fc3f7; }
+    .small { font-size: 0.7em; }
+    .smaller { font-size: 0.6em; }
+    .tag { color: #ffd54f; font-weight: bold; }
+    .ok { color: #81c784; }
+    .warn { color: #ff8a65; }
+    .muted { color: #9e9e9e; }
+    .cols { display: flex; gap: 30px; align-items: flex-start; }
+    .cols > div { flex: 1; }
+    .reveal section p, .reveal section li { line-height: 1.35; }
+    .badge { display:inline-block; padding:2px 10px; border-radius:12px; background:#263238; color:#4fc3f7; font-size:0.6em; margin:2px; }
+    .footer-note { position:fixed; bottom:8px; right:14px; font-size:14px; color:#555; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ================= CAPA ================= -->
+<section data-background-gradient="linear-gradient(to bottom, #0d1b2a, #1b263b)">
+  <h1>Sistema de Streaming</h1>
+  <h3>Cliente / Servidor com estruturas de dados implementadas à mão</h3>
+  <p class="small muted">Java puro, sem frameworks &nbsp;·&nbsp; Estruturas de Dados II</p>
+  <p>
+    <span class="badge">Árvore Splay</span>
+    <span class="badge">Compressão Huffman</span>
+    <span class="badge">Cache AVL</span>
+    <span class="badge">Tabela Hash</span>
+    <span class="badge">Tabela de Tradução</span>
+  </p>
+</section>
+
+<!-- ================= VISÃO GERAL ================= -->
+<section>
+  <h2>O que o projeto faz</h2>
+  <ul>
+    <li>Simula um <b>streaming cliente↔servidor</b> com catálogo de <b>1000 filmes reais</b> (IMDB Top 1000).</li>
+    <li>O usuário pesquisa <b>pelo nome</b> do filme; internamente tudo é resolvido <b>por ID</b>.</li>
+    <li><b>Multiusuário</b>: cada um tem cache e recomendações próprias; o servidor é compartilhado.</li>
+    <li class="tag">Toda a comunicação trafega comprimida com Huffman — nenhuma ida ao servidor escapa do canal.</li>
+  </ul>
+  <p class="small muted">Tudo construído sem bibliotecas de estrutura de dados: apenas arrays, nós e referências.</p>
+</section>
+
+<!-- ================= AS 5 ESTRUTURAS ================= -->
+<section>
+  <h2>As 5 estruturas de dados</h2>
+  <table>
+    <tr><th>Estrutura</th><th>Onde</th><th>Papel</th><th>Política</th></tr>
+    <tr><td><b>Tabela Hash</b></td><td>Servidor</td><td>Banco principal por ID</td><td>Encadeamento exterior</td></tr>
+    <tr><td><b>Tabela de Tradução</b></td><td>Cliente</td><td>nome → ID</td><td>Hash própria</td></tr>
+    <tr><td><b>Cache AVL</b></td><td>Cliente</td><td>Cache de filmes por ID</td><td>Eviction FIFO</td></tr>
+    <tr><td><b>Árvore Splay</b></td><td>Cliente + Servidor</td><td>Recomendações</td><td>Eviction LRU</td></tr>
+    <tr><td><b>Árvore de Huffman</b></td><td>Canal</td><td>Compressão das mensagens</td><td>Por mensagem</td></tr>
+  </table>
+  <p class="small">Vamos passar por todas — com <b>destaque para Splay e Huffman</b>.</p>
+</section>
+
+<!-- ================= TABELA HASH ================= -->
+<section>
+  <h2>1. Tabela Hash <span class="muted small">(servidor)</span></h2>
+  <div class="cols">
+    <div>
+      <ul class="small">
+        <li>Banco do servidor: <b>1000 filmes</b> em <b>211 posições</b>.</li>
+        <li>Índice: <code>Math.floorMod(id, capacidade)</code>.</li>
+        <li>Colisões por <b>encadeamento exterior</b> (lista ligada por balde) — ~5 filmes por balde.</li>
+        <li>A busca conta as <b>comparações</b> percorridas na cadeia.</li>
+      </ul>
+    </div>
+    <div>
+<pre><code class="language-java">public BuscaFilmeResultado buscarPorId(int id) {
+  int indice = calcularIndice(id);
+  int comparacoes = 0;
+  EntradaHash e = tabela[indice];
+  while (e != null) {
+    comparacoes++;
+    if (e.chave == id)
+      return new BuscaFilmeResultado(e.filme, comparacoes);
+    e = e.proxima;          // anda na corrente
+  }
+  return new BuscaFilmeResultado(null, comparacoes);
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TABELA TRADUÇÃO ================= -->
+<section>
+  <h2>2. Tabela de Tradução <span class="muted small">(cliente)</span></h2>
+  <ul>
+    <li>Hash própria com chave no <b>nome normalizado</b> e valor no <b>ID</b>.</li>
+    <li>Montada no início: o cliente recebe o índice <code>nome→id</code> do servidor <b>comprimido</b> e popula a tabela.</li>
+    <li>Permite pesquisar por nome <b>sem mudar</b> a hash do servidor nem o cache AVL (que continuam por ID).</li>
+    <li>Tolerante a maiúsculas/minúsculas (a chave é sempre normalizada).</li>
+  </ul>
+  <p class="small muted">É o "tradutor" que conecta a pesquisa humana (nome) ao fluxo interno (ID).</p>
+</section>
+
+<!-- ================= CACHE AVL ================= -->
+<section>
+  <h2>3. Cache AVL <span class="muted small">(cliente)</span></h2>
+  <div class="cols">
+    <div>
+      <ul class="small">
+        <li>Árvore <b>balanceada</b> ordenada por ID → busca <code>O(log n)</code>.</li>
+        <li>Capacidade <b>50</b> (menor que o catálogo, de propósito).</li>
+        <li>Eviction <b>FIFO</b>: cada nó guarda a <code>ordemEntrada</code>; ao lotar, sai o que entrou primeiro.</li>
+        <li><b>HIT no cache</b> = resposta local, <span class="ok">sem tocar a rede</span>.</li>
+      </ul>
+    </div>
+    <div>
+<pre><code class="language-java">private class NoAVL {
+  K chave; V valor;
+  long ordemEntrada;   // define quem sai (FIFO)
+  int altura;          // mantém o balanceamento
+  NoAVL esquerda, direita;
+}</code></pre>
+      <p class="smaller muted">Balanceamento por altura + rotações; remoção escolhe o nó de menor <code>ordemEntrada</code>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SPLAY: ABERTURA ================= -->
+<section data-background-color="#102027">
+  <h2>4. Árvore Splay — recomendações</h2>
+  <h3>O destaque do projeto</h3>
+  <p>Genérica, usada nos <b>dois lados</b>:</p>
+  <ul>
+    <li><span class="tag">Splay do cliente</span> → cada filme consultado sobe; o topo é a recomendação <b>pessoal</b>.</li>
+    <li><span class="tag">Splay do servidor</span> → cada filme servido a qualquer um sobe; o topo é a recomendação <b>global</b>.</li>
+  </ul>
+</section>
+
+<!-- ================= SPLAY: IDEIA ================= -->
+<section>
+  <h3>A ideia central do "splay"</h3>
+  <ul>
+    <li>A cada <b>acesso</b> (busca ou inserção), o nó acessado é <b>levado até a raiz</b> por rotações.</li>
+    <li>Consequência: o que é acessado com frequência/recência fica <b>perto da raiz</b> — barato de achar de novo.</li>
+    <li>Isso vira <b>recomendação natural</b>: o topo da árvore = o que está em alta.</li>
+  </ul>
+  <pre><code class="language-text">acesso a D:           splay(D)
+      B                    D
+     / \                  / \
+    A   E      ──►        B   E
+       / \              / \    \
+      D   F            A   C    F
+     /
+    C</code></pre>
+  <p class="small muted">Splay <b>top-down</b> clássico de Sleator &amp; Tarjan (sem recursão por nó, reorganiza num passe só).</p>
+</section>
+
+<!-- ================= SPLAY: CÓDIGO BUSCAR ================= -->
+<section>
+  <h3>Splay — buscar marca recência</h3>
+  <pre><code class="language-java" data-line-numbers="2-9">public BuscaCacheResultado&lt;V&gt; buscar(K chave) {
+  if (raiz == null) return new BuscaCacheResultado&lt;&gt;(null, 0);
+  int comparacoes = contarComparacoes(chave);
+  raiz = splay(raiz, chave);                 // traz a chave p/ a raiz
+  if (raiz.chave.compareTo(chave) == 0) {
+    raiz.ultimoAcesso = ++relogio;           // carimba o instante
+    return new BuscaCacheResultado&lt;&gt;(raiz.valor, comparacoes);
+  }
+  return new BuscaCacheResultado&lt;&gt;(null, comparacoes);
+}</code></pre>
+  <p class="small">Cada nó guarda <code>ultimoAcesso</code> (um relógio lógico). Esse carimbo define <b>recomendação</b> e <b>eviction</b>.</p>
+</section>
+
+<!-- ================= SPLAY: LRU + RECOMENDAR ================= -->
+<section>
+  <h3>Splay — capacidade 50 e eviction LRU</h3>
+  <div class="cols">
+    <div>
+      <p class="small">Ao passar de 50 filmes, remove o de <b>acesso mais antigo</b> (LRU):</p>
+<pre><code class="language-java">if (capacidade > 0 && tamanho > capacidade)
+    removerMenosRecente();
+// remover = splay da chave p/ raiz
+//           + junta as subárvores</code></pre>
+    </div>
+    <div>
+      <p class="small">Recomendar = ordenar por <code>ultimoAcesso</code> desc:</p>
+<pre><code class="language-java">public List&lt;V&gt; recomendar(int qtd) {
+  List&lt;NoSplay&gt; nos = new ArrayList&lt;&gt;();
+  coletar(raiz, nos);
+  nos.sort(comparingLong(
+     n -&gt; n.ultimoAcesso).reversed());
+  // devolve os 'qtd' mais recentes
+}</code></pre>
+    </div>
+  </div>
+  <p class="small muted">Por isso usuários diferentes veem recomendações pessoais diferentes, mas a do servidor reflete todos.</p>
+</section>
+
+<!-- ================= HUFFMAN: ABERTURA ================= -->
+<section data-background-color="#1a237e">
+  <h2>5. Compressão Huffman — o canal</h2>
+  <p>Toda mensagem entre cliente e servidor é <b>comprimida</b> antes de "trafegar".</p>
+  <p class="tag">Caracteres frequentes ganham códigos curtos; raros, códigos longos.</p>
+</section>
+
+<!-- ================= HUFFMAN: ALGORITMO ================= -->
+<section>
+  <h3>Huffman em 4 passos</h3>
+  <ol class="small">
+    <li><b>Frequências</b> — conta cada caractere do texto (<code>HashMap</code>).</li>
+    <li><b>Árvore</b> — cada caractere vira folha; combina sempre os <b>2 nós de menor frequência</b> até sobrar 1.</li>
+    <li><b>Códigos</b> — caminho raiz→folha (<code>0</code> esquerda, <code>1</code> direita).</li>
+    <li><b>Empacota</b> — concatena os bits e fecha em <code>byte[]</code>.</li>
+  </ol>
+  <pre><code class="language-java">while (floresta.size() > 1) {
+  NoHuffman menor       = removerMenor(floresta);
+  NoHuffman segundoMenor = removerMenor(floresta);
+  floresta.add(new NoHuffman(menor, segundoMenor)); // pai = soma das freq.
+}
+return floresta.get(0);   // raiz da árvore de Huffman</code></pre>
+</section>
+
+<!-- ================= HUFFMAN: DECODE + PACOTE ================= -->
+<section>
+  <h3>Decodificação e o Pacote</h3>
+  <div class="cols">
+    <div>
+      <p class="small">Percorre a árvore <b>bit a bit</b> até cair numa folha:</p>
+<pre><code class="language-java">for (int i = 0; i &lt; totalBits; i++) {
+  int bit = (dados[i/8] &gt;&gt; (7-(i%8))) &amp; 1;
+  atual = bit==0 ? atual.esquerda
+                 : atual.direita;
+  if (atual.folha()) {
+    texto.append(atual.caractere);
+    atual = raiz;
+  }
+}</code></pre>
+    </div>
+    <div>
+      <p class="small">O <code>Pacote</code> carrega tudo p/ decodificar:</p>
+      <ul class="smaller">
+        <li><code>byte[] dados</code> — bits compactados</li>
+        <li><code>totalBits</code> — bits válidos (ignora padding)</li>
+        <li><code>arvore</code> — o "dicionário"</li>
+        <li><code>bytesOriginais</code> — p/ calcular a taxa</li>
+      </ul>
+      <p class="smaller muted">Caso de borda: texto de 1 símbolo só → árvore vira uma folha, código "0".</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CANAL ================= -->
+<section>
+  <h3>O Canal: Huffman + estatísticas</h3>
+  <pre><code class="language-java">public Pacote comprimir(String texto) {
+  Pacote p = Huffman.comprimir(texto);
+  mensagensEnviadas++;                       // contabilidade
+  bytesOriginais   += p.getBytesOriginais();
+  bytesComprimidos += p.getBytesComprimidos();
+  return p;
+}
+public String descomprimir(Pacote p) { return Huffman.descomprimir(p); }</code></pre>
+  <p class="small">Canal único e compartilhado. Cada <b>requisição</b> e cada <b>resposta</b> é comprimida separadamente.
+  <br>Saída típica: <span class="ok">reducao=51.28%</span> numa busca.</p>
+</section>
+
+<!-- ================= FLUXO: TÍTULO ================= -->
+<section data-background-gradient="linear-gradient(to bottom, #1b263b, #0d1b2a)">
+  <h1>O fluxo principal</h1>
+  <h3>Da inicialização até uma busca atravessar o canal</h3>
+</section>
+
+<!-- ================= FLUXO 1: INIT ================= -->
+<section>
+  <h3>1 · Inicialização <span class="muted small">(Main.main)</span></h3>
+  <pre><code class="language-text">main()
+ ├─ new CanalComunicacao()              cria o canal (compartilhado)
+ ├─ new ServidorStreaming(211, canal)   hash de 211 posições
+ ├─ servidor.carregarBaseDeArquivo()    lê filmes.csv -> popula a hash
+ ├─ valida total == 1000 filmes
+ ├─ imprime cabeçalho
+ └─ executarLogin(servidor, canal, ...) entra no laço de login</code></pre>
+  <p class="small tag">Um único canal e um único servidor são criados e passados adiante. O servidor já nasce com toda a base na TabelaHashFilmes.</p>
+</section>
+
+<!-- ================= FLUXO 2: LOGIN ================= -->
+<section>
+  <h3>2 · Login multiusuário <span class="muted small">(executarLogin)</span></h3>
+  <pre><code class="language-text">loop tela de login:
+   lê nome do usuário
+   ├─ "0"  -> encerra o programa
+   ├─ nome novo:
+   │     new ClienteStreaming(nome, servidor, canal, 50)
+   │     cliente.sincronizarTabelaTraducao()  &lt;-- 1ª comunicação comprimida!
+   │     guarda no mapa de usuários
+   └─ executarSessao(...)                      entra no menu</code></pre>
+  <p class="small">A <code>sincronizarTabelaTraducao()</code> pede <code>GET_INDICE</code>, recebe o índice nome→id <b>comprimido</b> e monta a tradução local.
+  <br>Cada usuário tem cache AVL e Splay próprios; o servidor é compartilhado.</p>
+</section>
+
+<!-- ================= FLUXO 3: MENU ================= -->
+<section>
+  <h3>3 · Menu da sessão <span class="muted small">(executarSessao)</span></h3>
+  <p class="small">Laço <code>do/while</code> que lê a opção e despacha. Ex.: opção 3 →</p>
+  <pre><code class="language-text">buscar(...)  ->  cliente.consultarPorNome(nome)</code></pre>
+  <p class="smaller muted">Outras opções: listar categorias, 20 consultas aleatórias (popula recomendações), mostrar cache, recomendações, estatísticas Huffman, logout.</p>
+</section>
+
+<!-- ================= FLUXO 4: CORAÇÃO ================= -->
+<section>
+  <h3>4 · O coração: uma busca por nome</h3>
+  <pre><code class="language-text" data-line-numbers="1-4|5-9|10-17|18">consultarPorNome(nome)                      [ClienteStreaming:99]
+ ├─ traducao.traduzir(nome) -> id            tabela local (SEM rede)
+ │    nome inexistente? imprime e retorna
+ ├─ snapshotCanal()                          foto dos contadores ANTES
+ ├─ consultarFilme(id)
+ │    ├─ cache.buscar(id) (AVL)
+ │    │    HIT -> registra recom. (Splay local) e retorna  ── SEM REDE
+ │    │    MISS v
+ │    └─ enviar("GET_ID|<id>")               &lt;---- canal comprimido
+ │         ├─ canal.comprimir(texto) -> Pacote   (Huffman + stats)
+ │         ├─ servidor.atender(Pacote)       [ServidorStreaming:89]
+ │         │    ├─ canal.descomprimir -> texto
+ │         │    ├─ processar: hash.buscarPorId(id)
+ │         │    │    + registrarRecomendacao (Splay GLOBAL)
+ │         │    └─ canal.comprimir(resposta) -> Pacote
+ │         └─ canal.descomprimir(Pacote) -> texto da resposta
+ │         cache.inserir(id, filme)   |   registrarRecomendacao (Splay local)
+ └─ imprimirCompressaoDaPesquisa(antes)      diferença = custo desta busca</code></pre>
+</section>
+
+<!-- ================= PONTOS-CHAVE ================= -->
+<section>
+  <h3>Pontos-chave do fluxo</h3>
+  <ul class="small">
+    <li><b>Ponto único de comunicação:</b> cliente sempre via <code>enviar</code> (comprime→envia→descomprime); servidor sempre via <code>atender</code> (descomprime→processa→comprime).</li>
+    <li><b>Duas estruturas evitam/tocam a rede:</b>
+      <ul class="smaller">
+        <li>Tradução (nome→id) e cache AVL ficam no cliente → <span class="ok">HIT não gera comunicação</span>.</li>
+        <li>Só no <span class="warn">MISS</span> o pacote viaja e bate na TabelaHashFilmes.</li>
+      </ul>
+    </li>
+    <li><b>Duas Splay, dois pontos de alimentação:</b> cliente (gosto pessoal) e servidor (popularidade global).</li>
+    <li><b>Estatística por snapshot:</b> fotografa os contadores antes e subtrai depois → isola o custo daquela busca; opção 10 mostra o acumulado da sessão.</li>
+  </ul>
+</section>
+
+<!-- ================= ENCERRAMENTO ================= -->
+<section data-background-gradient="linear-gradient(to bottom, #0d1b2a, #1b263b)">
+  <h2>Resumo</h2>
+  <ul>
+    <li><b>Splay</b> transforma recência em recomendação — sem estrutura extra.</li>
+    <li><b>Huffman</b> comprime 100% do tráfego; integridade preservada (comparações voltam intactas).</li>
+    <li><b>Hash + AVL + Tradução</b> sustentam busca por nome resolvida por ID, com cache local.</li>
+    <li class="tag">Tudo em Java puro, implementado manualmente.</li>
+  </ul>
+  <p class="small muted">Obrigado! Perguntas?</p>
+</section>
+
+</div>
+</div>
+
+<div class="footer-note">setas ← → navegam · "S" notas · "F" tela cheia · "O" visão geral</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/plugin/notes/notes.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'slide',
+    plugins: [ RevealHighlight, RevealNotes ]
+  });
+</script>
+</body>
+</html>
