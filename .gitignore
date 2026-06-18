@@ -1,0 +1,12 @@
+# Saida de compilacao
+out/
+*.class
+
+# Arquivos de IDE (mantem apenas config essencial do modulo)
+.idea/workspace.xml
+.idea/shelf/
+*.iml.bak
+
+# Sistema
+.DS_Store
+Thumbs.db
